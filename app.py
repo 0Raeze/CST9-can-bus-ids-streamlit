@@ -78,89 +78,54 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     st.subheader("Manual CAN Frame Payload Inspection")
     
+    # 1. Initialize session state defaults if not already set
+    if "dlc_val" not in st.session_state:
+        st.session_state["dlc_val"] = 8
+    
+    default_hex = ["FE", "5B", "00", "00", "00", "3C", "00", "00"]
+    for i in range(8):
+        if f"byte_{i}" not in st.session_state:
+            st.session_state[f"byte_{i}"] = default_hex[i]
+
+    # 2. Callback functions to directly set session state
+    def load_normal_preset():
+        st.session_state["dlc_val"] = 8
+        normal_bytes = ["05", "21", "68", "09", "21", "21", "00", "6F"]
+        for idx, b in enumerate(normal_bytes):
+            st.session_state[f"byte_{idx}"] = b
+
+    def load_dos_preset():
+        st.session_state["dlc_val"] = 8
+        for idx in range(8):
+            st.session_state[f"byte_{idx}"] = "00"
+
+    # 3. Preset Buttons connected via on_click
     col_preset1, col_preset2 = st.columns(2)
-    use_preset = None
     with col_preset1:
-        if st.button("🟢 Load Preset: Legitimate Engine Telemetry"):
-            use_preset = "normal"
+        st.button("🟢 Load Preset: Legitimate Engine Telemetry", on_click=load_normal_preset)
     with col_preset2:
-        if st.button("🔴 Load Preset: Injected DoS Attack Frame (00 00 ... 00)"):
-            use_preset = "dos"
+        st.button("🔴 Load Preset: Injected DoS Attack Frame (00 00 ... 00)", on_click=load_dos_preset)
 
-    if use_preset == "dos":
-        default_dlc = 8
-        default_bytes = ["00"] * 8
-    elif use_preset == "normal":
-        default_dlc = 8
-        default_bytes = ["05", "21", "68", "09", "21", "21", "00", "6F"]
-    else:
-        default_dlc = 8
-        default_bytes = ["FE", "5B", "00", "00", "00", "3C", "00", "00"]
-
-    dlc = st.slider("Data Length Code (DLC):", min_value=1, max_value=8, value=default_dlc)
+    # 4. Slider tied to session state
+    dlc = st.slider("Data Length Code (DLC):", min_value=1, max_value=8, key="dlc_val")
 
     st.markdown("**Payload Data Field [Bytes 0 to 7] (Base-16 Hexadecimal):**")
     cols = st.columns(8)
     byte_inputs = []
 
+    # 5. Text inputs bound directly to session state
     for i in range(8):
         with cols[i]:
             disabled = i >= dlc
-            default_val = "-1" if disabled else default_bytes[i]
-            val = st.text_input(f"Byte {i}", value=default_val, max_chars=2, disabled=disabled, key=f"byte_{i}")
+            val = st.text_input(f"Byte {i}", max_chars=2, disabled=disabled, key=f"byte_{i}")
             
             if disabled:
-                byte_inputs.append(-1)
+                byte_inputs.append(-1.0)
             else:
                 try:
-                    byte_inputs.append(int(val.strip(), 16))
+                    byte_inputs.append(float(int(val.strip(), 16)))
                 except ValueError:
-                    byte_inputs.append(-1)
-
-    if st.button("⚡ Inspect Message Payload", type="primary", use_container_width=True):
-        if not is_loaded:
-            st.error("Cannot inspect: Upload `oc_svm_model.joblib` and `can_preprocessor.joblib` to your repository root.")
-        else:
-            input_dict = {
-                "DLC": [dlc],
-                "Payload_Byte_0": [byte_inputs[0]],
-                "Payload_Byte_1": [byte_inputs[1]],
-                "Payload_Byte_2": [byte_inputs[2]],
-                "Payload_Byte_3": [byte_inputs[3]],
-                "Payload_Byte_4": [byte_inputs[4]],
-                "Payload_Byte_5": [byte_inputs[5]],
-                "Payload_Byte_6": [byte_inputs[6]],
-                "Payload_Byte_7": [byte_inputs[7]]
-            }
-            frame_df = pd.DataFrame(input_dict).astype(float)
-
-            start_time = time.perf_counter()
-            prepared_frame = preprocessor.transform(frame_df)
-            raw_prediction = model.predict(prepared_frame)[0]
-            decision_dist = model.decision_function(prepared_frame)[0]
-            anomaly_score = -decision_dist
-            latency_ms = (time.perf_counter() - start_time) * 1000
-
-            st.divider()
-            if raw_prediction == -1:
-                st.error("🚨 **MALICIOUS INTRUSION DETECTED: OUT-OF-DISTRIBUTION PAYLOAD**")
-                verdict = "Injected Cyber Attack"
-            else:
-                st.success("✅ **LEGITIMATE VEHICLE TELEMETRY: INLIER CONFIRMED**")
-                verdict = "Normal Operation"
-
-            res1, res2, res3, res4 = st.columns(4)
-            with res1:
-                st.metric("System Verdict", verdict)
-            with res2:
-                st.metric("Signed Margin Distance", f"{decision_dist:.4f}")
-            with res3:
-                st.metric("Anomaly Score", f"{anomaly_score:.4f}")
-            with res4:
-                st.metric("Inference Latency", f"{latency_ms:.3f} ms")
-
-            with st.expander("Inspected Vector Data"):
-                st.dataframe(frame_df)
+                    byte_inputs.append(-1.0)
 
 # ------------------------------------------------------------------------------
 # TAB 2: BATCH CSV LOG ANALYSIS
