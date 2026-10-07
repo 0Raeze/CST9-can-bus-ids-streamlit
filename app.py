@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import time
+import os
 
 # ------------------------------------------------------------------------------
 # 1. PAGE CONFIGURATION
@@ -13,15 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 
-import os
-
 # ------------------------------------------------------------------------------
 # 2. LOAD TRAINED ARTIFACTS
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def load_artifacts():
     try:
-        # Use absolute path relative to app.py
         base_dir = os.path.dirname(os.path.abspath(__file__))
         model_path = os.path.join(base_dir, "oc_svm_model.joblib")
         prep_path = os.path.join(base_dir, "can_preprocessor.joblib")
@@ -30,7 +28,6 @@ def load_artifacts():
         preprocessor = joblib.load(prep_path)
         return model, preprocessor, True
     except Exception as e:
-        st.sidebar.error(f"❌ Real Error: {e}")
         return None, None, False
 
 model, preprocessor, is_loaded = load_artifacts()
@@ -78,7 +75,7 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     st.subheader("Manual CAN Frame Payload Inspection")
     
-    # 1. Initialize session state defaults if not already set
+    # Session state initialization
     if "dlc_val" not in st.session_state:
         st.session_state["dlc_val"] = 8
     
@@ -87,33 +84,30 @@ with tab1:
         if f"byte_{i}" not in st.session_state:
             st.session_state[f"byte_{i}"] = default_hex[i]
 
-    # 2. Callback functions to directly set session state
-    def load_normal_preset():
+    # Callback functions to update inputs
+    def set_normal_telemetry():
         st.session_state["dlc_val"] = 8
         normal_bytes = ["05", "21", "68", "09", "21", "21", "00", "6F"]
         for idx, b in enumerate(normal_bytes):
             st.session_state[f"byte_{idx}"] = b
 
-    def load_dos_preset():
+    def set_dos_attack():
         st.session_state["dlc_val"] = 8
         for idx in range(8):
             st.session_state[f"byte_{idx}"] = "00"
 
-    # 3. Preset Buttons connected via on_click
     col_preset1, col_preset2 = st.columns(2)
     with col_preset1:
-        st.button("🟢 Load Preset: Legitimate Engine Telemetry", on_click=load_normal_preset)
+        st.button("🟢 Load Preset: Legitimate Engine Telemetry", on_click=set_normal_telemetry, use_container_width=True)
     with col_preset2:
-        st.button("🔴 Load Preset: Injected DoS Attack Frame (00 00 ... 00)", on_click=load_dos_preset)
+        st.button("🔴 Load Preset: Injected DoS Attack Frame (00 00 ... 00)", on_click=set_dos_attack, use_container_width=True)
 
-    # 4. Slider tied to session state
     dlc = st.slider("Data Length Code (DLC):", min_value=1, max_value=8, key="dlc_val")
 
     st.markdown("**Payload Data Field [Bytes 0 to 7] (Base-16 Hexadecimal):**")
     cols = st.columns(8)
     byte_inputs = []
 
-    # 5. Text inputs bound directly to session state
     for i in range(8):
         with cols[i]:
             disabled = i >= dlc
@@ -126,6 +120,52 @@ with tab1:
                     byte_inputs.append(float(int(val.strip(), 16)))
                 except ValueError:
                     byte_inputs.append(-1.0)
+
+    st.markdown("")
+    if st.button("⚡ Inspect Message Payload", type="primary", use_container_width=True):
+        if not is_loaded:
+            st.error("Cannot inspect: Upload `oc_svm_model.joblib` and `can_preprocessor.joblib` to your repository root.")
+        else:
+            input_dict = {
+                "DLC": [float(dlc)],
+                "Payload_Byte_0": [byte_inputs[0]],
+                "Payload_Byte_1": [byte_inputs[1]],
+                "Payload_Byte_2": [byte_inputs[2]],
+                "Payload_Byte_3": [byte_inputs[3]],
+                "Payload_Byte_4": [byte_inputs[4]],
+                "Payload_Byte_5": [byte_inputs[5]],
+                "Payload_Byte_6": [byte_inputs[6]],
+                "Payload_Byte_7": [byte_inputs[7]]
+            }
+            frame_df = pd.DataFrame(input_dict).astype(float)
+
+            start_time = time.perf_counter()
+            prepared_frame = preprocessor.transform(frame_df)
+            raw_prediction = model.predict(prepared_frame)[0]
+            decision_dist = model.decision_function(prepared_frame)[0]
+            anomaly_score = -decision_dist
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            st.divider()
+            if raw_prediction == -1:
+                st.error("🚨 **MALICIOUS INTRUSION DETECTED: OUT-OF-DISTRIBUTION PAYLOAD**")
+                verdict = "Injected Cyber Attack"
+            else:
+                st.success("✅ **LEGITIMATE VEHICLE TELEMETRY: INLIER CONFIRMED**")
+                verdict = "Normal Operation"
+
+            res1, res2, res3, res4 = st.columns(4)
+            with res1:
+                st.metric("System Verdict", verdict)
+            with res2:
+                st.metric("Signed Margin Distance", f"{decision_dist:.4f}")
+            with res3:
+                st.metric("Anomaly Score", f"{anomaly_score:.4f}")
+            with res4:
+                st.metric("Inference Latency", f"{latency_ms:.3f} ms")
+
+            with st.expander("Inspected Vector Data"):
+                st.dataframe(frame_df)
 
 # ------------------------------------------------------------------------------
 # TAB 2: BATCH CSV LOG ANALYSIS
@@ -194,7 +234,7 @@ with tab3:
     st.markdown("""
     ---
     ### Model Architectural Highlights:
-    * **Zero Signature Dependency:** Trains exclusively on legitimate telemetry to catch zero-day DoS flooding.
+    * **Zero Signature Dependency:** Trained exclusively on legitimate telemetry to detect zero-day DoS message flooding.
     * **Shortcut-Resistant:** `CAN_ID` and `Timestamp` are dropped so the model evaluates payload structure rather than ID artifacts.
     * **Deterministic Latency:** Evaluates non-linear RBF kernel distance without deep recursive branching.
     """)
