@@ -13,16 +13,24 @@ st.set_page_config(
     layout="wide"
 )
 
+import os
+
 # ------------------------------------------------------------------------------
 # 2. LOAD TRAINED ARTIFACTS
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def load_artifacts():
     try:
-        model = joblib.load("oc_svm_model.joblib")
-        preprocessor = joblib.load("can_preprocessor.joblib")
+        # Use absolute path relative to app.py
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(base_dir, "oc_svm_model.joblib")
+        prep_path = os.path.join(base_dir, "can_preprocessor.joblib")
+        
+        model = joblib.load(model_path)
+        preprocessor = joblib.load(prep_path)
         return model, preprocessor, True
-    except Exception:
+    except Exception as e:
+        st.sidebar.error(f"❌ Real Error: {e}")
         return None, None, False
 
 model, preprocessor, is_loaded = load_artifacts()
