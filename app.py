@@ -132,7 +132,7 @@ with tab1:
                 "Payload_Byte_6": [byte_inputs[6]],
                 "Payload_Byte_7": [byte_inputs[7]]
             }
-            frame_df = pd.DataFrame(input_dict)
+            frame_df = pd.DataFrame(input_dict).astype(float)
 
             start_time = time.perf_counter()
             prepared_frame = preprocessor.transform(frame_df)
@@ -185,7 +185,7 @@ with tab2:
                     st.error("Model artifacts missing.")
                 else:
                     with st.spinner("Processing network stream..."):
-                        X_eval = batch_df[required_cols]
+                        X_eval = batch_df[required_cols].astype(float)
                         X_prepared = preprocessor.transform(X_eval)
                         preds = model.predict(X_prepared)
                         scores = -model.decision_function(X_prepared)
